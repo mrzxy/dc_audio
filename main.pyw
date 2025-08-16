@@ -86,6 +86,25 @@ connect.add_argument(
 args = parser.parse_args()
 is_gui = not any([args.channel, args.device, args.query, args.online])
 
+# CLI模式下的日志配置
+if not is_gui:
+    # 为CLI模式配置控制台日志
+    cli_formatter = logging.Formatter(
+        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    
+    cli_handler = logging.StreamHandler()
+    cli_handler.setLevel(logging.INFO)
+    cli_handler.setFormatter(cli_formatter)
+    
+    # 获取根logger并添加CLI handler
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(cli_handler)
+    
+    # 确保sound和cli模块的logger级别正确
+    logging.getLogger('sound').setLevel(logging.INFO)
+    logging.getLogger('cli').setLevel(logging.INFO)
 
 # verbose logs
 if args.verbose:
