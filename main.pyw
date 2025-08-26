@@ -193,17 +193,18 @@ async def main(bot):
 http_proxy = None
 if args.dev:
     http_proxy = "http://127.0.0.1:7890"
-# run program
-bot = discord.Client(intents=discord.Intents.default(), proxy=http_proxy)
-loop = asyncio.get_event_loop_policy().get_event_loop()
+
+# 配置机器人意图
 import discord
 from discord.ext import commands
 
 intents = discord.Intents.default()
-intents.voice_states = True  # 启用语音状态监听
-intents.members = True       # 启用成员监听（需要获取成员信息）
+intents.voice_states = True      # 启用语音状态监听
+intents.members = True           # 启用成员监听（需要获取成员信息）
+intents.message_content = True   # 启用消息内容意图（用于命令功能）
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+# 创建机器人实例
+bot = commands.Bot(command_prefix='!', intents=intents, proxy=http_proxy)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -222,7 +223,7 @@ async def on_voice_state_update(member, before, after):
         print(f"{member} 从 {before.channel.name} 切换到了 {after.channel.name}")
         # 这里可以添加您的处理逻辑
 
-     # 打印所有状态变化以便调试
+    # 打印所有状态变化以便调试
     print(f"成员: {member}")
     print(f"之前: 频道={before.channel}, 自静音={before.self_mute}, 自聋音={before.self_deaf}")
     print(f"之后: 频道={after.channel}, 自静音={after.self_mute}, 自聋音={after.self_deaf}")
@@ -231,12 +232,12 @@ async def on_voice_state_update(member, before, after):
     if before.self_mute != after.self_mute:
         if after.self_mute:
             print(f"{member} 将自己静音了")
-            # 处理静音事件
-            await handle_mute_event(member, True)
+            # 可以在这里添加静音事件的处理逻辑
+            pass
         else:
             print(f"{member} 取消了自己的静音")
-            # 处理取消静音事件
-            await handle_mute_event(member, False)
+            # 可以在这里添加取消静音事件的处理逻辑
+            pass
     
     # 检查聋音状态变化
     if before.self_deaf != after.self_deaf:
@@ -259,28 +260,25 @@ async def on_voice_state_update(member, before, after):
         else:
             print(f"{member} 被服务器取消聋音模式")
 
-@bot.event
-async def on_disconnect():
-    """机器人断开连接事件"""
-    print("⚠️ 机器人与Discord断开连接")
-
-@bot.event
-async def on_resumed():
-    """机器人恢复连接事件"""
-    print("✅ 机器人恢复与Discord的连接")
     
-try:
-    loop.run_until_complete(main(bot))
-    print("main over")
+async def run_bot():
+    """运行机器人的主函数"""
+    try:
+        await main(bot)
+        print("main over")
+    except KeyboardInterrupt:
+        print("Exiting...")
+        await bot.close()
+        # this sleep prevents a bugged exception on Windows
+        await asyncio.sleep(1)
+    except Exception as e:
+        print(e)
 
-except KeyboardInterrupt:
-    print("Exiting...")
-    loop.run_until_complete(bot.close())
+# 使用现代的asyncio.run()方法启动机器人
+if __name__ == "__main__":
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        print("程序被用户中断")
 
-    # this sleep prevents a bugged exception on Windows
-    loop.run_until_complete(asyncio.sleep(1))
-    loop.close()
-except Exception as e:
-    print(e)
-
-print("main over laset line")
+print("程序结束")
