@@ -6,7 +6,7 @@ error_formatter = logging.Formatter(
 )
 
 error_handler = logging.FileHandler("DAP_errors.log", delay=True)
-error_handler.setLevel(logging.ERROR)
+error_handler.setLevel(logging.INFO)
 error_handler.setFormatter(error_formatter)
 
 base_logger = logging.getLogger()
@@ -196,7 +196,79 @@ if args.dev:
 # run program
 bot = discord.Client(intents=discord.Intents.default(), proxy=http_proxy)
 loop = asyncio.get_event_loop_policy().get_event_loop()
+import discord
+from discord.ext import commands
 
+intents = discord.Intents.default()
+intents.voice_states = True  # 启用语音状态监听
+intents.members = True       # 启用成员监听（需要获取成员信息）
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # 连接语音频道事件
+    if before.channel is None and after.channel is not None:
+        print(f"{member} 加入了语音频道 {after.channel.name}")
+        # 这里可以添加您的处理逻辑
+    
+    # 离开语音频道事件
+    if before.channel is not None and after.channel is None:
+        print(f"{member} 离开了语音频道 {before.channel.name}")
+        # 这里可以添加您的处理逻辑
+    
+    # 切换语音频道事件
+    if before.channel is not None and after.channel is not None and before.channel != after.channel:
+        print(f"{member} 从 {before.channel.name} 切换到了 {after.channel.name}")
+        # 这里可以添加您的处理逻辑
+
+     # 打印所有状态变化以便调试
+    print(f"成员: {member}")
+    print(f"之前: 频道={before.channel}, 自静音={before.self_mute}, 自聋音={before.self_deaf}")
+    print(f"之后: 频道={after.channel}, 自静音={after.self_mute}, 自聋音={after.self_deaf}")
+    
+    # 检查静音状态变化
+    if before.self_mute != after.self_mute:
+        if after.self_mute:
+            print(f"{member} 将自己静音了")
+            # 处理静音事件
+            await handle_mute_event(member, True)
+        else:
+            print(f"{member} 取消了自己的静音")
+            # 处理取消静音事件
+            await handle_mute_event(member, False)
+    
+    # 检查聋音状态变化
+    if before.self_deaf != after.self_deaf:
+        if after.self_deaf:
+            print(f"{member} 将自己设为聋音模式")
+        else:
+            print(f"{member} 取消了自己的聋音模式")
+    
+    # 检查服务器静音状态变化
+    if before.mute != after.mute:
+        if after.mute:
+            print(f"{member} 被服务器静音")
+        else:
+            print(f"{member} 被服务器取消静音")
+    
+    # 检查服务器聋音状态变化
+    if before.deaf != after.deaf:
+        if after.deaf:
+            print(f"{member} 被服务器设为聋音模式")
+        else:
+            print(f"{member} 被服务器取消聋音模式")
+
+@bot.event
+async def on_disconnect():
+    """机器人断开连接事件"""
+    print("⚠️ 机器人与Discord断开连接")
+
+@bot.event
+async def on_resumed():
+    """机器人恢复连接事件"""
+    print("✅ 机器人恢复与Discord的连接")
+    
 try:
     loop.run_until_complete(main(bot))
     print("main over")
