@@ -15,14 +15,18 @@ base_logger.addHandler(error_handler)
 import sys
 import cli
 import sound
+from cli import try_reconnect
 import asyncio
 import discord
+from discord.ext import commands, tasks
 import argparse
 
 # commandline args
 parser = argparse.ArgumentParser(description="Discord Audio Pipe")
 connect = parser.add_argument_group("Command Line Mode")
 query = parser.add_argument_group("Queries")
+current_channel = None
+voice_connection=None
 
 parser.add_argument(
     "-t",
@@ -204,62 +208,37 @@ intents.members = True           # 启用成员监听（需要获取成员信息
 intents.message_content = True   # 启用消息内容意图（用于命令功能）
 
 # 创建机器人实例
-bot = commands.Bot(command_prefix='!', intents=intents, proxy=http_proxy)
+bot = commands.Bot(command_prefix='!', intents=intents, proxy=http_proxy,  reconnect=True )
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # 连接语音频道事件
-    if before.channel is None and after.channel is not None:
-        print(f"{member} 加入了语音频道 {after.channel.name}")
-        # 这里可以添加您的处理逻辑
+    if member.id != bot.user.id:
+        return
     
-    # 离开语音频道事件
-    if before.channel is not None and after.channel is None:
-        print(f"{member} 离开了语音频道 {before.channel.name}")
-        # 这里可以添加您的处理逻辑
-    
-    # 切换语音频道事件
-    if before.channel is not None and after.channel is not None and before.channel != after.channel:
-        print(f"{member} 从 {before.channel.name} 切换到了 {after.channel.name}")
-        # 这里可以添加您的处理逻辑
+    # 检查是否断开连接
+    if before.channel and not after.channel:
+        print(f"机器人被断开连接或离开频道")
+        # 如果之前是主动离开，不自动重连
+        
+        # 延迟后尝试重连
+        await asyncio.sleep(2)
 
-    # 打印所有状态变化以便调试
-    print(f"成员: {member}")
-    print(f"之前: 频道={before.channel}, 自静音={before.self_mute}, 自聋音={before.self_deaf}")
-    print(f"之后: 频道={after.channel}, 自静音={after.self_mute}, 自聋音={after.self_deaf}")
-    
-    # 检查静音状态变化
-    if before.self_mute != after.self_mute:
-        if after.self_mute:
-            print(f"{member} 将自己静音了")
-            # 可以在这里添加静音事件的处理逻辑
-            pass
-        else:
-            print(f"{member} 取消了自己的静音")
-            # 可以在这里添加取消静音事件的处理逻辑
-            pass
-    
-    # 检查聋音状态变化
-    if before.self_deaf != after.self_deaf:
-        if after.self_deaf:
-            print(f"{member} 将自己设为聋音模式")
-        else:
-            print(f"{member} 取消了自己的聋音模式")
-    
-    # 检查服务器静音状态变化
-    if before.mute != after.mute:
-        if after.mute:
-            print(f"{member} 被服务器静音")
-        else:
-            print(f"{member} 被服务器取消静音")
-    
-    # 检查服务器聋音状态变化
-    if before.deaf != after.deaf:
-        if after.deaf:
-            print(f"{member} 被服务器设为聋音模式")
-        else:
-            print(f"{member} 被服务器取消聋音模式")
+        await try_reconnect(bot, args.channel) 
 
+@bot.event
+async def on_connect():
+    """连接到Discord时触发"""
+    logging.info('已连接到Discord服务器')
+
+@bot.event
+async def on_disconnect():
+    """与Discord断开连接时触发"""
+    logging.info('与Discord服务器断开连接')
+
+@bot.event
+async def on_resumed():
+    """连接恢复时触发"""
+    logging.info('连接已恢复')
     
 async def run_bot():
     """运行机器人的主函数"""
@@ -281,4 +260,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("程序被用户中断")
 
-print("程序结束")

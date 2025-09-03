@@ -4,6 +4,15 @@ import logging
 import asyncio
 
 
+audio_stream = None
+
+def get_audio_stream(device_id):
+    global audio_stream
+    if not audio_stream:
+        audio_stream = sound.PCMStream()
+        audio_stream.change_device(device_id)
+    return audio_stream
+
 async def connect(bot, device_id, channel_id):
     import datetime
     
@@ -14,23 +23,21 @@ async def connect(bot, device_id, channel_id):
         await bot.wait_until_ready()
         print(f"已登录为: {bot.user.name}")
 
-        stream = sound.PCMStream()
-        channel = bot.get_channel(channel_id)
-        if not channel:
+        current_channel = bot.get_channel(channel_id)
+        if not current_channel:
             print(f"错误: 找不到频道ID {channel_id}")
             return
             
-        print(f"找到频道: {channel.name} (服务器: {channel.guild.name})")
-        stream.change_device(device_id)
+        print(f"找到频道: {current_channel.name} (服务器: {current_channel.guild.name})")
 
-        voice = None
-        max_retries = 3
+        stream = get_audio_stream(device_id)
+        max_retries = 30
         retry_count = 0
         
         while retry_count < max_retries:
             try:
                 print(f"正在连接到语音频道... (尝试 {retry_count + 1}/{max_retries})")
-                voice = await channel.connect(reconnect=True, self_deaf=False, self_mute=False)
+                voice_connection = await current_channel.connect(reconnect=True, self_deaf=False, self_mute=False)
                 break
             except Exception as e:
                 retry_count += 1
@@ -42,21 +49,15 @@ async def connect(bot, device_id, channel_id):
                     print("达到最大重试次数，连接失败")
                     raise
         
-        if not voice:
+        if not voice_connection:
             print("无法建立语音连接")
             return
             
-        # 更新全局状态变量
-        import main
-        main.voice_connection = voice
-        main.current_channel = channel
-        main.connection_start_time = datetime.datetime.now()
         
-        voice.play(stream)
-        print(f"✅ 成功连接到语音频道: {channel.name}")
-        print(f"🎵 音频流已启动，监听设备: {device_id}")
-        print("📊 语音频道状态监听已激活...")
-        print("⌨️  按 Ctrl+C 停止")
+        connection_start_time = datetime.datetime.now()
+        
+        voice_connection.play(stream)
+        print(f"✅ 成功连接到语音频道: {current_channel.name}, 监听设备: {device_id}")
 
         # 连接状态监控循环
         connection_check_interval = 5  # 每5秒检查一次
@@ -64,22 +65,22 @@ async def connect(bot, device_id, channel_id):
         status_interval = 60  # 每60秒显示一次状态
         
         try:
-            while voice.is_connected():
+            while voice_connection.is_connected():
+               
                 await asyncio.sleep(connection_check_interval)
-                
                 # 定期显示连接状态
                 current_time = datetime.datetime.now()
                 if (current_time - last_status_time).seconds >= status_interval:
-                    uptime = current_time - main.connection_start_time
-                    member_count = len(channel.members) if channel.members else 0
+                    uptime = current_time - connection_start_time
+                    member_count = len(current_channel.members) if current_channel.members else 0
                     print(f"[状态检查] 连接时间: {uptime}, 频道人数: {member_count}, 延迟: {round(bot.latency * 1000)}ms")
                     last_status_time = current_time
                 
                 # 检查语音连接健康状态
-                if not voice.is_playing() and stream:
+                if not voice_connection.is_playing() and audio_stream:
                     try:
                         # 重新启动音频流
-                        voice.play(stream)
+                        voice_connection.play(audio_stream)
                         print("🔄 音频流已重新启动")
                     except Exception as e:
                         print(f"⚠️ 音频流重启失败: {e}")
@@ -91,15 +92,16 @@ async def connect(bot, device_id, channel_id):
         finally:
             # 清理工作
             try:
-                if voice and voice.is_connected():
-                    voice.stop()
-                    await voice.disconnect()
+                if voice_connection and voice_connection.is_connected():
+                    voice_connection.stop()
+                    await voice_connection.disconnect()
                     print("✅ 已断开语音连接")
+
+                await asyncio.sleep(2)
                 
-                # 重置全局状态
-                main.voice_connection = None
-                main.current_channel = None
-                main.connection_start_time = None
+                print("重新连接音频...")
+                await connect(bot, device_id, channel_id)
+                
                 
             except Exception as e:
                 print(f"⚠️ 清理资源时出错: {e}")
@@ -121,3 +123,66 @@ async def query(bot, token):
             print("\t", channel.id, channel.name)
 
     await bot.logout()
+
+async def try_reconnect(bot,    channel_id):
+    return 
+    """尝试重新连接到语音频道"""
+    import datetime
+    
+    try:
+        global voice_connection, current_channel, connection_start_time
+        
+        channel = bot.get_channel(channel_id)
+        if not channel:
+            print(f"错误: 找不到频道ID {channel_id}")
+            return
+        
+        
+        # 清理旧连接
+        if voice_connection and voice_connection.is_connected():
+            try:
+                voice_connection.stop()
+                await voice_connection.disconnect()
+            except:
+                pass
+        
+        # 重新连接
+        voice_connection = await channel.connect(reconnect=True, self_deaf=False, self_mute=False)
+        connection_start_time = datetime.datetime.now()
+        
+        # 如果有音频流，重新开始播放
+        if audio_stream:
+            voice_connection.play(audio_stream)
+            print(f"✅ 成功重新连接到 {channel.name}，音频流已恢复")
+        else:
+            print(f"✅ 成功重新连接到 {channel.name}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ 重连失败: {str(e)}")
+        return False
+
+
+def get_connection_status():
+    """获取当前连接状态"""
+    import datetime
+    
+    global voice_connection, current_channel, connection_start_time, audio_stream
+    
+    if not voice_connection or not current_channel:
+        return {
+            'connected': False,
+            'playing': False,
+            'channel': None,
+            'uptime': None,
+            'has_stream': audio_stream is not None
+        }
+    
+    return {
+        'connected': voice_connection.is_connected(),
+        'playing': voice_connection.is_playing(),
+        'channel': current_channel.name,
+        'uptime': datetime.datetime.now() - connection_start_time if connection_start_time else None,
+        'has_stream': audio_stream is not None
+    }
