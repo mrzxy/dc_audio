@@ -1,4 +1,18 @@
 import logging
+import sys
+import os
+
+# Windows编码兼容性修复
+if sys.platform.startswith('win'):
+    # 设置标准输出编码为UTF-8
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    elif hasattr(sys.stdout, 'buffer'):
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
+    # 设置环境变量
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # error logging
 error_formatter = logging.Formatter(
@@ -12,7 +26,6 @@ error_handler.setFormatter(error_formatter)
 base_logger = logging.getLogger()
 base_logger.addHandler(error_handler)
 
-import sys
 import cli
 import sound
 from cli import try_reconnect
@@ -215,28 +228,24 @@ async def on_voice_state_update(member, before, after):
     if member.id != bot.user.id:
         return
     # 检查是否断开连接
-    # if before.channel and not after.channel:
-    #     print(f"机器人被断开连接或离开频道")
-    #     await asyncio.sleep(2)
-    #     await try_reconnect(bot, args.channel) 
+    if before.channel and not after.channel:
+        print(f"bot have been disconnected")
+        await asyncio.sleep(2)
+        await try_reconnect(bot, args.channel) 
 
 @bot.event
 async def on_connect():
-    """连接到Discord时触发"""
-    logging.info('已连接到Discord服务器')
+    logging.info('bot have been connected')
 
 @bot.event
 async def on_disconnect():
-    """与Discord断开连接时触发"""
-    logging.info('与Discord服务器断开连接')
+    logging.info('bot have been disconnected    ')
 
 @bot.event
 async def on_resumed():
-    """连接恢复时触发"""
-    logging.info('连接已恢复')
+    logging.info('bot have been resumed')
     
 async def run_bot():
-    """运行机器人的主函数"""
     try:
         await main(bot)
         print("main over")
