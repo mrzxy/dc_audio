@@ -214,16 +214,11 @@ bot = commands.Bot(command_prefix='!', intents=intents, proxy=http_proxy,  recon
 async def on_voice_state_update(member, before, after):
     if member.id != bot.user.id:
         return
-    
     # 检查是否断开连接
-    if before.channel and not after.channel:
-        print(f"机器人被断开连接或离开频道")
-        # 如果之前是主动离开，不自动重连
-        
-        # 延迟后尝试重连
-        await asyncio.sleep(2)
-
-        await try_reconnect(bot, args.channel) 
+    # if before.channel and not after.channel:
+    #     print(f"机器人被断开连接或离开频道")
+    #     await asyncio.sleep(2)
+    #     await try_reconnect(bot, args.channel) 
 
 @bot.event
 async def on_connect():
