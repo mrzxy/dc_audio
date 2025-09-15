@@ -3,6 +3,7 @@ import sound
 import logging
 import asyncio
 import os
+import discord
 
 # Windows编码兼容性修复
 if sys.platform.startswith('win'):
@@ -26,6 +27,96 @@ def get_audio_stream(device_id):
         audio_stream.change_device(device_id)
     return audio_stream
 
+
+async def safe_play_audio(voice_connection, audio_source, max_retries=3):
+    """安全播放音频，处理'Already playing audio'异常"""
+    for attempt in range(max_retries):
+        try:
+            # 检查是否已经在播放
+            if voice_connection.is_playing():
+                print(f"🔊 检测到音频正在播放，停止当前播放...")
+                voice_connection.stop()
+                await asyncio.sleep(0.5)  # 等待停止完成
+            
+            # 开始播放
+            voice_connection.play(audio_source)
+            print(f"🎵 音频流已开始播放")
+            return True
+            
+        except discord.ClientException as e:
+            if "Already playing audio" in str(e):
+                print(f"⚠️ 尝试 {attempt + 1}/{max_retries}: 音频仍在播放，强制停止...")
+                voice_connection.stop()
+                await asyncio.sleep(1)
+                if attempt == max_retries - 1:
+                    print(f"❌ 无法停止现有音频播放")
+                    return False
+            else:
+                print(f"❌ 音频播放异常: {e}")
+                return False
+        except Exception as e:
+            print(f"❌ 音频播放错误: {e}")
+            return False
+    
+    return False
+
+
+async def ensure_voice_connection(channel):
+    """确保语音连接，处理已连接的情况"""
+    # 检查机器人是否已经连接到语音频道
+    existing_voice = channel.guild.voice_client
+    
+    if existing_voice and existing_voice.is_connected():
+        if existing_voice.channel == channel:
+            print(f"✅ 机器人已连接到目标频道 {channel.name}")
+            return existing_voice
+        else:
+            print(f"🔄 机器人已连接到其他频道 {existing_voice.channel.name}，正在切换...")
+            await existing_voice.disconnect()
+            await asyncio.sleep(1)
+    
+    # 创建新连接
+    max_retries = 30
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            print(f"🔗 正在连接到语音频道... (尝试 {retry_count + 1}/{max_retries})")
+            voice_connection = await channel.connect(reconnect=True, self_deaf=False, self_mute=False)
+            print(f"✅ 成功连接到语音频道 {channel.name}")
+            return voice_connection
+            
+        except discord.ClientException as e:
+            if "Already connected to a voice channel" in str(e):
+                print("🔍 检测到已有连接，尝试获取现有连接...")
+                voice_connection = channel.guild.voice_client
+                if voice_connection and voice_connection.is_connected():
+                    print(f"✅ 使用现有连接到 {voice_connection.channel.name}")
+                    return voice_connection
+                else:
+                    print("⚠️ 现有连接无效，继续重试...")
+            
+            retry_count += 1
+            print(f"❌ 连接失败: {e}")
+            if retry_count < max_retries:
+                print(f"⏳ 等待5秒后重试...")
+                await asyncio.sleep(5)
+            else:
+                print("🚫 达到最大重试次数，连接失败")
+                raise
+                
+        except Exception as e:
+            retry_count += 1
+            print(f"❌ 连接失败: {e}")
+            if retry_count < max_retries:
+                print(f"⏳ 等待5秒后重试...")
+                await asyncio.sleep(5)
+            else:
+                print("🚫 达到最大重试次数，连接失败")
+                raise
+    
+    return None
+
 async def connect(bot, device_id, channel_id):
     import datetime
     
@@ -44,23 +135,9 @@ async def connect(bot, device_id, channel_id):
         print(f"找到频道: {current_channel.name} (服务器: {current_channel.guild.name})")
 
         stream = get_audio_stream(device_id)
-        max_retries = 30
-        retry_count = 0
         
-        while retry_count < max_retries:
-            try:
-                print(f"正在连接到语音频道... (尝试 {retry_count + 1}/{max_retries})")
-                voice_connection = await current_channel.connect(reconnect=True, self_deaf=False, self_mute=False)
-                break
-            except Exception as e:
-                retry_count += 1
-                print(f"连接失败: {e}")
-                if retry_count < max_retries:
-                    print(f"等待5秒后重试...")
-                    await asyncio.sleep(5)
-                else:
-                    print("达到最大重试次数，连接失败")
-                    raise
+        # 使用辅助函数确保语音连接
+        voice_connection = await ensure_voice_connection(current_channel)
         
         if not voice_connection:
             print("无法建立语音连接")
@@ -69,7 +146,12 @@ async def connect(bot, device_id, channel_id):
         
         connection_start_time = datetime.datetime.now()
         
-        voice_connection.play(stream)
+        # 使用安全播放函数
+        play_success = await safe_play_audio(voice_connection, stream)
+        if not play_success:
+            print("❌ 无法开始音频播放")
+            return
+        
         print(f"✅ 成功连接到语音频道: {current_channel.name}, 监听设备: {device_id}")
 
         # 连接状态监控循环
@@ -91,12 +173,12 @@ async def connect(bot, device_id, channel_id):
                 
                 # 检查语音连接健康状态
                 if not voice_connection.is_playing() and audio_stream:
-                    try:
-                        # 重新启动音频流
-                        voice_connection.play(audio_stream)
-                        print("🔄 音频流已重新启动")
-                    except Exception as e:
-                        print(f"⚠️ 音频流重启失败: {e}")
+                    print("🔄 检测到音频流停止，尝试重启...")
+                    restart_success = await safe_play_audio(voice_connection, audio_stream)
+                    if restart_success:
+                        print("✅ 音频流已重新启动")
+                    else:
+                        print("⚠️ 音频流重启失败")
                         
         except KeyboardInterrupt:
             print("\n🛑 用户中断，正在停止...")
@@ -137,36 +219,46 @@ async def query(bot, token):
 
     await bot.logout()
 
-async def try_reconnect(bot,    channel_id):
-    return 
+async def try_reconnect(bot, channel_id):
     """尝试重新连接到语音频道"""
     import datetime
     
     try:
-        global voice_connection, current_channel, connection_start_time
+        global audio_stream
         
         channel = bot.get_channel(channel_id)
         if not channel:
-            print(f"错误: 找不到频道ID {channel_id}")
-            return
+            print(f"❌ 错误: 找不到频道ID {channel_id}")
+            return False
         
+        print(f"🔄 尝试重新连接到 {channel.name}...")
         
         # 清理旧连接
-        if voice_connection and voice_connection.is_connected():
+        existing_voice = channel.guild.voice_client
+        if existing_voice and existing_voice.is_connected():
             try:
-                voice_connection.stop()
-                await voice_connection.disconnect()
-            except:
-                pass
+                existing_voice.stop()
+                await existing_voice.disconnect()
+                await asyncio.sleep(1)
+            except Exception as e:
+                print(f"⚠️ 清理旧连接时出错: {e}")
         
-        # 重新连接
-        voice_connection = await channel.connect(reconnect=True, self_deaf=False, self_mute=False)
+        # 使用辅助函数重新连接
+        voice_connection = await ensure_voice_connection(channel)
+        
+        if not voice_connection:
+            print("❌ 无法建立语音连接")
+            return False
+        
         connection_start_time = datetime.datetime.now()
         
         # 如果有音频流，重新开始播放
         if audio_stream:
-            voice_connection.play(audio_stream)
-            print(f"✅ 成功重新连接到 {channel.name}，音频流已恢复")
+            play_success = await safe_play_audio(voice_connection, audio_stream)
+            if play_success:
+                print(f"✅ 成功重新连接到 {channel.name}，音频流已恢复")
+            else:
+                print(f"⚠️ 重新连接到 {channel.name}，但音频流启动失败")
         else:
             print(f"✅ 成功重新连接到 {channel.name}")
         
